@@ -60,30 +60,46 @@ class MyStopper(Node):
   # YOUR CODE HERE
 
 		# GUIDE: Determine what the closest obstacle/reading is for scans in front of the robot
-		#  Step 1: Determine which of the range readings correspond to being "in front of" the robot (see comment at top)
-		#    Remember that robot scans are in the robot's coordinate system - theta = 0 means straight ahead
+		#  Step 1: Determine which of the range readings correspond to being 
+		# "in front of" the robot (see comment at top) Remember that robot scans are in the 
+		#  robot's coordinate system - theta = 0 means straight ahead
 		#  Step 2: Get the minimum distance to the closest object (use only scans "in front of" the robot)
 		#  Step 3: Use the closest distance from above to decide when to stop
 		#  Step 4: Scale how fast you move by the distance to the closet object (tanh is handy here...)
 		#  Step 5: Make sure to actually stop if close to 1 m
 		# Finally, set t.linear.x to be your desired speed (0 if stop)
 		# Suggestion: Do this with a for loop before being fancy with numpy (which is substantially faster)
-		# DO NOT hard-wire in the number of readings, or the min/max angle. You CAN hardwire in the size of the robot
+		# DO NOT hard-wire in the number of readings, or the min/max angle. You CAN hardwire in the size of the 
+		
+		scan_angles = np.linspace(angle_min, angle_max, num_readings)
+		distances = np.array([d if not np.isinf(d) else 10.0 for d in scan.ranges])
+
+		shortest = 0
+		max_speed = 0.2
+
+		#I think I'm going to try an numpy array...
+		#fist, create a boolean mask of distances where the x values are inside the collision corridor
+		inside_sideways = abs(distances * np.sin(scan_angles)) < 0.19
+		inside_front = (distances * np.cos(scan_angles)) > 0.0
+		shortest = np.min(distances[inside_front & inside_sideways])
+
+		speed_modifier = np.tanh(shortest - 1)
+		x_speed = max_speed * speed_modifier if speed_modifier >= 0.0 else 0.0
+
 
 		# Create a twist and fill in all the fields (you will only set t.linear.x).
 		t = TwistStamped()
 		t.header = Header()
 		t.header.frame_id = 'base_link'  # Transform is in the robot's coordinate frame
 		t.header.stamp = self.get_clock().now().to_msg()  # What time are we sending this?
-		t.twist.linear.x = 0.0
+		t.twist.linear.x = x_speed
 		t.twist.linear.y = 0.0
 		t.twist.linear.z = 0.0
 		t.twist.angular.x = 0.0
 		t.twist.angular.y = 0.0
 		t.twist.angular.z = 0.0
 
-		shortest = 0
-		max_speed = 0.2
+		
   # YOUR CODE HERE
 
 		# Send the command to the robot.
