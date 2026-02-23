@@ -86,7 +86,6 @@ class MyStopper(Node):
 		speed_modifier = np.tanh(shortest - 1)
 		x_speed = max_speed * speed_modifier if speed_modifier >= 0.0 else 0.0
 
-
 		# Create a twist and fill in all the fields (you will only set t.linear.x).
 		t = TwistStamped()
 		t.header = Header()
@@ -98,7 +97,6 @@ class MyStopper(Node):
 		t.twist.angular.x = 0.0
 		t.twist.angular.y = 0.0
 		t.twist.angular.z = 0.0
-
 		
   # YOUR CODE HERE
 
@@ -107,8 +105,6 @@ class MyStopper(Node):
 
 		# Print out a log message to the INFO channel to let us know it's working.
 		self.get_logger().info(f'Shortest {shortest}, speed {t.twist.linear.x}')
-
-
 
 # The idiom in ROS2 is to use a function to do all of the setup and work.  This
 # function is referenced in the setup.py file as the entry point of the node when

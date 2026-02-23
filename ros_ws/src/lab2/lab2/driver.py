@@ -102,6 +102,12 @@ class Lab3Driver(Node):
 
 		# GUIDE: Declare any variables here
   # YOUR CODE HERE
+		self.min_speed = 0.05
+		self.max_speed = 0.2         # This moves about 0.01 m between scans
+		self.max_turn = np.pi * 0.1
+		self.obstacle_threshold = 1.7
+		self.width = 0.38
+		self.stop_distance = 1.0
 
 		# Timer to make sure we publish the target marker (once we get a goal)
 		self.marker_timer = self.create_timer(1.0, self._marker_callback)
@@ -194,9 +200,9 @@ class Lab3Driver(Node):
 	def close_enough(self):
 		""" Return true if close enough to goal. This will be used in action_callback to stop moving toward the goal
 		@ return true/false """
-
-  # YOUR CODE HERE
-		return False
+  	# YOUR CODE HERE
+		if self.distance_to_target() <= self.threshold: return True
+		else: return False
 
 	def distance_to_target(self):
 		""" Communicate with send points - set to distance to target"""
@@ -337,8 +343,40 @@ class Lab3Driver(Node):
 		# GUIDE: Use this method to collect obstacle information - is something in front of, to the left, or to 
 		# the right of the robot? Start with your stopper code from Lab1
   # YOUR CODE HERE
-		return False, 0.0, 0.0
+		obstacle_detected = False
+		angular_z, angular_z_direction = 0, 0
+		
+		angle_min, angle_max, num_readings = scan.angle_min, scan.angle_max, len(scan.ranges)
+		scan_angles = np.linspace(angle_min, angle_max, num_readings)
+		distances = np.array([d if not np.isinf(d) else 10.0 for d in scan.ranges])
 
+		inside_sideways = abs(distances * np.sin(scan_angles)) < self.width/2
+		inside_front = (distances * np.cos(scan_angles)) > 0.0
+		shortest = np.min(distances[inside_front & inside_sideways])
+		speed_modifier = np.tanh(shortest - self.stop_distance)
+		x_speed = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0
+		
+		if shortest < self.obstacle_threshold:
+			obstacle_detected = True
+			#first find the "openest" path
+			left_scans_mask = (distances * np.sin(scan_angles)) > self.width/2
+			right_scans_mask = (distances * np.sin(scan_angles)) < -self.width/2
+			x_distances = distances * np.cos(scan_angles)
+			furthest_left_dist = np.max(x_distances[left_scans_mask])
+			furthest_right_dist = np.max(x_distances[right_scans_mask])
+
+			#next, choose a direction based on which side is "openest"
+			if np.isclose(furthest_left_dist, furthest_right_dist): angular_z_direction = 1
+			elif furthest_right_dist > furthest_left_dist: angular_z_direction = 1
+			else: z_direction = -1
+
+		#for setting the angular_z, I'm just going to use bang-bang control
+		angular_z = angular_z_direction * self.max_turn
+
+		return obstacle_detected, x_speed, angular_z
+
+	
+	
 	def get_twist(self, scan):
 		"""This is the method that calculate the twist
 		@param scan - a LaserScan message with the current data from the LiDAR.  Use this for obstacle avoidance. 
@@ -355,15 +393,33 @@ class Lab3Driver(Node):
 		# Reminder 2: target is in self.target 
 		#  Note: If the target is behind you, might turn first before moving
 		#  Note: 0.4 is a good speed if nothing is in front of the robot
+		target_angle = np.atan2(self.target.point.y, self.target.point.x)
+		target_distance = self.distance_to_target()
+		obstacle_detected, obstacle_linear_x, obstacle_angular_z = self.get_obstacle(scan)
+		
+		angle_direction = np.sign(target_angle)
 
-		min_speed = 0.05
-		max_speed = 0.2         # This moves about 0.01 m between scans
-		max_turn = np.pi * 0.1  # This turns about 2 degrees between scans
+		linear_x = 0
+		angular_z = 0
+
+		if abs(target_angle) > np.pi/4:
+			linear_x = 0
+			angular_z = angle_direction * self.max_turn
+		
+		elif obstacle_detected:
+			linear_x = obstacle_linear_x
+			angular_z = obstacle_angular_z
+		else:
+			speed_modifier = np.tanh(target_distance - self.stop_distance)
+			linear_x = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0
+			angular_z = angle_direction * self.max_turn
+		
+		t.twist.linear.x = linear_x
+		t.twist.angular.z = angular_z
+
 
   # YOUR CODE HERE
 
-		# t.twist.linear.x = max_speed
-		# t.twist.angular.z = 0.0
 		if self.print_twist_messages:
 			self.get_logger().info(f"Setting twist forward {t.twist.linear.x} angle {t.twist.angular.z}")
 		return t			
