@@ -366,9 +366,9 @@ class Lab3Driver(Node):
 			furthest_right_dist = np.max(x_distances[right_scans_mask])
 
 			#next, choose a direction based on which side is "openest"
-			if np.isclose(furthest_left_dist, furthest_right_dist): angular_z_direction = 1
+			if np.isclose(furthest_left_dist, furthest_right_dist, 0.3): angular_z_direction = 1
 			elif furthest_right_dist > furthest_left_dist: angular_z_direction = 1
-			else: z_direction = -1
+			else: angular_z_direction = -1
 
 		#for setting the angular_z, I'm just going to use bang-bang control
 		angular_z = angular_z_direction * self.max_turn
@@ -393,7 +393,7 @@ class Lab3Driver(Node):
 		# Reminder 2: target is in self.target 
 		#  Note: If the target is behind you, might turn first before moving
 		#  Note: 0.4 is a good speed if nothing is in front of the robot
-		target_angle = np.atan2(self.target.point.y, self.target.point.x)
+		target_angle = np.arctan2(self.target.point.y, self.target.point.x)
 		target_distance = self.distance_to_target()
 		obstacle_detected, obstacle_linear_x, obstacle_angular_z = self.get_obstacle(scan)
 		
@@ -403,16 +403,16 @@ class Lab3Driver(Node):
 		angular_z = 0
 
 		if abs(target_angle) > np.pi/4:
-			linear_x = 0
-			angular_z = angle_direction * self.max_turn
+			linear_x = 0.0
+			angular_z = float(angle_direction * self.max_turn)
 		
 		elif obstacle_detected:
-			linear_x = obstacle_linear_x
-			angular_z = obstacle_angular_z
+			linear_x = float(obstacle_linear_x)
+			angular_z = float(obstacle_angular_z)
 		else:
-			speed_modifier = np.tanh(target_distance - self.stop_distance)
-			linear_x = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0
-			angular_z = angle_direction * self.max_turn
+			speed_modifier = np.tanh(target_distance - self.threshold/2)
+			linear_x = float(self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0)
+			angular_z = float(angle_direction * self.max_turn)
 		
 		t.twist.linear.x = linear_x
 		t.twist.angular.z = angular_z
