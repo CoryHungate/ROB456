@@ -108,6 +108,11 @@ class Lab3Driver(Node):
 		self.obstacle_threshold = 1.7
 		self.width = 0.38
 		self.stop_distance = 1.0
+		self.obstacle_detected = False
+		self.current_turn_dir = 0
+		self.collision_width = self.width * 1.2
+		self.obstacle_left = False
+		self.obstacle_right = False
 
 		# Timer to make sure we publish the target marker (once we get a goal)
 		self.marker_timer = self.create_timer(1.0, self._marker_callback)
@@ -343,37 +348,58 @@ class Lab3Driver(Node):
 		# GUIDE: Use this method to collect obstacle information - is something in front of, to the left, or to 
 		# the right of the robot? Start with your stopper code from Lab1
   # YOUR CODE HERE
-		obstacle_detected = False
-		angular_z, angular_z_direction = 0, 0
-		
+		x_speed, angular_z = 0, self.max_speed
+
 		angle_min, angle_max, num_readings = scan.angle_min, scan.angle_max, len(scan.ranges)
 		scan_angles = np.linspace(angle_min, angle_max, num_readings)
 		distances = np.array([d if not np.isinf(d) else 10.0 for d in scan.ranges])
 
-		inside_sideways = abs(distances * np.sin(scan_angles)) < self.width/2
-		inside_front = (distances * np.cos(scan_angles)) > 0.0
-		shortest = np.min(distances[inside_front & inside_sideways])
-		speed_modifier = np.tanh(shortest - self.stop_distance)
-		x_speed = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0
-		
-		if shortest < self.obstacle_threshold:
-			obstacle_detected = True
-			#first find the "openest" path
-			left_scans_mask = (distances * np.sin(scan_angles)) > self.width/2
-			right_scans_mask = (distances * np.sin(scan_angles)) < -self.width/2
-			x_distances = distances * np.cos(scan_angles)
-			furthest_left_dist = np.max(x_distances[left_scans_mask])
-			furthest_right_dist = np.max(x_distances[right_scans_mask])
+		#first, lets do a quick if so if anything is further away than 2 x stop_limit, just ignore return to get_twist
+		if np.min(distances) < 2 * self.stop_distance:
+			#first, let's convert the scan to an x,y coordinate system
+			distances_xy = np.array([distances * np.cos(scan_angles)], distances * np.sin(scan_angles))
 
-			#next, choose a direction based on which side is "openest"
-			if np.isclose(furthest_left_dist, furthest_right_dist, 0.3): angular_z_direction = 1
-			elif furthest_right_dist > furthest_left_dist: angular_z_direction = 1
-			else: angular_z_direction = -1
+			#next, math to figure out my speed
+			inside_sideways = abs(distances[0,:]) < self.collision_width/2
+			shortest = np.min(distances[inside_front & inside_sideways])
+			speed_modifier = np.tanh(shortest - self.stop_distance)
+
+			
+			
+
+			#note that speed is declared independently... I shouldnt need to change the value below.
+			x_speed = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0
+			
+			if self.obstacle_detected:
+				#check that I can leave avoid mode (maintain speed, set turn to zero)
+				#I'm currently in "avoid mode". maintain turn direction and speed
+				if shortest > self.obstacle_threshold:
+					self.obstacle_detected = False
+					self.current_turn_dir = 0
+			
+				else:
+					#do I even need anything here? I don't think so...
+					...
+				
+			else:
+				if shortest < self.obstacle_threshold:
+					self.obstacle_detected = True
+					#first find the "openest" path
+					left_x_scans_mask = (distances * np.sin(scan_angles)) > self.collision_width/2
+					right_x_scans_mask = (distances * np.sin(scan_angles)) < -self.collision_width/2
+					x_distances = distances * np.cos(scan_angles)
+					furthest_left_dist = np.max(x_distances[left_x_scans_mask])
+					furthest_right_dist = np.max(x_distances[right_x_scans_mask])
+
+					#next, choose a direction based on which side is "openest"
+					if np.isclose(furthest_left_dist, furthest_right_dist, 0.3): self.current_turn_dir = 1
+					elif furthest_right_dist > furthest_left_dist: self.current_turn_dir = -1
+					else: self.current_turn_dir = 1
 
 		#for setting the angular_z, I'm just going to use bang-bang control
-		angular_z = angular_z_direction * self.max_turn
+		angular_z = self.current_turn_dir * self.max_turn
 
-		return obstacle_detected, x_speed, angular_z
+		return self.obstacle_detected, x_speed, angular_z
 
 	
 	
