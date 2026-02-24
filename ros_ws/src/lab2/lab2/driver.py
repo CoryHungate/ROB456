@@ -114,6 +114,9 @@ class Lab3Driver(Node):
 		self.obstacle_right = False
 		self.obstacle_front = False
 
+		self.best_distance = 20.0
+		self.last_improve_time = self.get_clock().now()
+
 		# Timer to make sure we publish the target marker (once we get a goal)
 		self.marker_timer = self.create_timer(1.0, self._marker_callback)
 
@@ -241,7 +244,21 @@ class Lab3Driver(Node):
 				self.get_logger().info(f"Goal was canceled")
 
 				return result
-			
+			now = self.get_clock.now().nanoseconds * 1e-9
+			if not np.isclose(self.distance_to_target(), self.best_distance, rtol = 0.05):
+				self.best_distance = self.distance_to_target() 
+				self.last_improve_time = self.get_clock.now().nanoseconds * 1e-9
+			else:
+				if self.get_clock.now() - self.last_improve_time > 4:
+					self.get_logger().info("Goal aborted. Object in the way.")
+
+					t = self.zero_twist()
+					self.cmd_pub.publish(t)
+					
+					goal_handle.abort()
+					return result
+
+
 			feedback = NavTarget.Feedback()
 			feedback.distance.data = self.distance_to_target()
 			
@@ -376,11 +393,11 @@ class Lab3Driver(Node):
 			
 
 			# !!!NOTE: I've changed obstacle detected to obstacle front... need to figure out the rest of the logic for how I want to do that...
-			if self.obstacle_detected:
+			if self.obstacle_front:
 				#check that I can leave avoid mode (maintain speed, set turn to zero)
 				#I'm currently in "avoid mode". maintain turn direction and speed
 				if shortest > self.obstacle_threshold:
-					self.obstacle_detected = False
+					self.obstacle_front = False
 					self.current_turn_dir = 0
 					#no need for an else statement, nothgning changes
 				
@@ -404,9 +421,9 @@ class Lab3Driver(Node):
 					self.current_turn_dir = 0
 
 		#for setting the angular_z, I'm just going to use bang-bang control
-		angular_z = self.current_turn_dir * self.max_turn
+		angular_z = self.current_turn_dir * 0.25 * self.max_turn
 
-		return self.obstacle_detected, x_speed, angular_z
+		return np.any(self.obstacle_front, self.obstacle_left, self.obstacle_right), x_speed, angular_z
 
 	
 	
@@ -443,6 +460,8 @@ class Lab3Driver(Node):
 			linear_x = float(obstacle_linear_x)
 			angular_z = float(obstacle_angular_z)
 		else:
+			if abs(target_angle) < np.pi/6:
+				angular_z = 0.2 * angle_direction
 			speed_modifier = np.tanh(target_distance - self.threshold/2)
 			linear_x = float(self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0)
 			angular_z = float(angle_direction * self.max_turn)
