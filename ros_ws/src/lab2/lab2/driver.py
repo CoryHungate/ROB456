@@ -236,6 +236,10 @@ class Lab3Driver(Node):
 		# Reset target
 		self.set_target()
 
+		# my additions
+		self.best_distance = self.distance_to_target()
+		self.last_improve_time = self.get_clock().now.nanoseconds * 1e-9
+
 		# Keep publishing feedback, then sleeping (so the laser scan can happen)
 		# GUIDE: If you aren't making progress, stop the while loop and mark the goal as failed
 		rate = self.create_rate(0.5)
@@ -244,21 +248,26 @@ class Lab3Driver(Node):
 				self.get_logger().info(f"Goal was canceled")
 
 				return result
-			now = self.get_clock.now().nanoseconds * 1e-9
-			if not np.isclose(self.distance_to_target(), self.best_distance, rtol = 0.05):
-				self.best_distance = self.distance_to_target() 
-				self.last_improve_time = self.get_clock.now().nanoseconds * 1e-9
+			
+			# more of my additions to handle obstacle in the way of goal
+			now = self.get_clock().now().nanoseconds * 1e-9
+			d = self.distance_to_target
+
+			if d < self.best_distance - 0.05:
+				self.best_distance = d 
+				self.last_improve_time = now
 			else:
-				if self.get_clock.now() - self.last_improve_time > 4:
+				if now - self.last_improve_time > 6:
 					self.get_logger().info("Goal aborted. Object in the way.")
 
 					t = self.zero_twist()
 					self.cmd_pub.publish(t)
+					self.goal = None
 					
 					goal_handle.abort()
 					return result
 
-
+			# back to provided code
 			feedback = NavTarget.Feedback()
 			feedback.distance.data = self.distance_to_target()
 			
@@ -460,11 +469,10 @@ class Lab3Driver(Node):
 			linear_x = float(obstacle_linear_x)
 			angular_z = float(obstacle_angular_z)
 		else:
-			if abs(target_angle) < np.pi/6:
-				angular_z = 0.2 * angle_direction
 			speed_modifier = np.tanh(target_distance - self.threshold/2)
 			linear_x = float(self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0)
-			angular_z = float(angle_direction * self.max_turn)
+			if abs(target_angle) < np.pi/6: angular_z = 0.2 * angle_direction * self.max_turn
+			else: angular_z = float(angle_direction * self.max_turn)
 		
 		t.twist.linear.x = linear_x
 		t.twist.angular.z = angular_z
