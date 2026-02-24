@@ -108,11 +108,11 @@ class Lab3Driver(Node):
 		self.obstacle_threshold = 1.7
 		self.width = 0.38
 		self.stop_distance = 1.0
-		self.obstacle_detected = False
 		self.current_turn_dir = 0
-		self.collision_width = self.width * 1.2
+		self.collision_width = self.width * 2
 		self.obstacle_left = False
 		self.obstacle_right = False
+		self.obstacle_front = False
 
 		# Timer to make sure we publish the target marker (once we get a goal)
 		self.marker_timer = self.create_timer(1.0, self._marker_callback)
@@ -357,33 +357,37 @@ class Lab3Driver(Node):
 		#first, lets do a quick if so if anything is further away than 2 x stop_limit, just ignore return to get_twist
 		if np.min(distances) < 2 * self.stop_distance:
 			#first, let's convert the scan to an x,y coordinate system
-			distances_xy = np.array([distances * np.cos(scan_angles)], distances * np.sin(scan_angles))
+			distances_xy = np.array([distances * np.cos(scan_angles), distances * np.sin(scan_angles)])
 
 			#next, math to figure out my speed
-			inside_sideways = abs(distances[0,:]) < self.collision_width/2
-			shortest = np.min(distances[inside_front & inside_sideways])
+			inside_sideways = np.abs(distances_xy[1, :]) < self.width/2
+			shortest = np.min(distances_xy[0, inside_sideways])
 			speed_modifier = np.tanh(shortest - self.stop_distance)
-
-			
-			
 
 			#note that speed is declared independently... I shouldnt need to change the value below.
 			x_speed = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0
+
+			#next, I'm going to check for obstacles to my left and right
+			left_side_mask = distances_xy[1, :] > self.width/2
+			right_side_mask = distances_xy[1, :] < -self.width/2
+			self.obstacle_left = False if np.min(distances[left_side_mask]) > self.collision_width/2 else True
+			self.obstacle_right = False if np.max(distances[right_side_mask]) < -self.collision_width/2 else True
+			#self.obstacle_front = True if shortest < self.obstacle_threshold else False
 			
+
+			# !!!NOTE: I've changed obstacle detected to obstacle front... need to figure out the rest of the logic for how I want to do that...
 			if self.obstacle_detected:
 				#check that I can leave avoid mode (maintain speed, set turn to zero)
 				#I'm currently in "avoid mode". maintain turn direction and speed
 				if shortest > self.obstacle_threshold:
 					self.obstacle_detected = False
 					self.current_turn_dir = 0
-			
-				else:
-					#do I even need anything here? I don't think so...
-					...
+					#no need for an else statement, nothgning changes
 				
 			else:
+				#new obstacle detected
 				if shortest < self.obstacle_threshold:
-					self.obstacle_detected = True
+					self.obstacle_front = True
 					#first find the "openest" path
 					left_x_scans_mask = (distances * np.sin(scan_angles)) > self.collision_width/2
 					right_x_scans_mask = (distances * np.sin(scan_angles)) < -self.collision_width/2
@@ -395,6 +399,9 @@ class Lab3Driver(Node):
 					if np.isclose(furthest_left_dist, furthest_right_dist, 0.3): self.current_turn_dir = 1
 					elif furthest_right_dist > furthest_left_dist: self.current_turn_dir = -1
 					else: self.current_turn_dir = 1
+				
+				elif self.obstacle_left or self.obstacle_right:
+					self.current_turn_dir = 0
 
 		#for setting the angular_z, I'm just going to use bang-bang control
 		angular_z = self.current_turn_dir * self.max_turn
