@@ -238,7 +238,7 @@ class Lab3Driver(Node):
 
 		# my additions
 		self.best_distance = self.distance_to_target()
-		self.last_improve_time = self.get_clock().now.nanoseconds * 1e-9
+		self.last_improve_time = self.get_clock().now().nanoseconds * 1e-9
 
 		# Keep publishing feedback, then sleeping (so the laser scan can happen)
 		# GUIDE: If you aren't making progress, stop the while loop and mark the goal as failed
@@ -251,13 +251,13 @@ class Lab3Driver(Node):
 			
 			# more of my additions to handle obstacle in the way of goal
 			now = self.get_clock().now().nanoseconds * 1e-9
-			d = self.distance_to_target
+			d = self.distance_to_target()
 
 			if d < self.best_distance - 0.05:
 				self.best_distance = d 
 				self.last_improve_time = now
 			else:
-				if now - self.last_improve_time > 6:
+				if now - self.last_improve_time > 10:
 					self.get_logger().info("Goal aborted. Object in the way.")
 
 					t = self.zero_twist()
@@ -373,8 +373,10 @@ class Lab3Driver(Node):
 		
 		# GUIDE: Use this method to collect obstacle information - is something in front of, to the left, or to 
 		# the right of the robot? Start with your stopper code from Lab1
-  # YOUR CODE HERE
-		x_speed, angular_z = 0, self.max_speed
+  		# YOUR CODE HERE
+		x_speed, angular_z = self.max_speed, 0
+		self.obstacle_left, self.obstacle_right = False, False
+
 
 		angle_min, angle_max, num_readings = scan.angle_min, scan.angle_max, len(scan.ranges)
 		scan_angles = np.linspace(angle_min, angle_max, num_readings)
@@ -396,8 +398,8 @@ class Lab3Driver(Node):
 			#next, I'm going to check for obstacles to my left and right
 			left_side_mask = distances_xy[1, :] > self.width/2
 			right_side_mask = distances_xy[1, :] < -self.width/2
-			self.obstacle_left = False if np.min(distances[left_side_mask]) > self.collision_width/2 else True
-			self.obstacle_right = False if np.max(distances[right_side_mask]) < -self.collision_width/2 else True
+			self.obstacle_left = True if np.min(distances[left_side_mask]) < self.collision_width/2 else False
+			self.obstacle_right = True if np.min(distances[right_side_mask]) < self.collision_width/2 else False
 			#self.obstacle_front = True if shortest < self.obstacle_threshold else False
 			
 
@@ -409,10 +411,14 @@ class Lab3Driver(Node):
 					self.obstacle_front = False
 					self.current_turn_dir = 0
 					#no need for an else statement, nothgning changes
+			if self.obstacle_left: self.current_turn_dir = -1
+			if self.obstacle_right: self.current_turn_dir = 1
 				
 			else:
 				#new obstacle detected
-				if shortest < self.obstacle_threshold:
+				if self.obstacle_left: self.current_turn_dir = -1
+				elif self.obstacle_right: self.current_turn_dir = 1
+				elif shortest < self.obstacle_threshold:
 					self.obstacle_front = True
 					#first find the "openest" path
 					left_x_scans_mask = (distances * np.sin(scan_angles)) > self.collision_width/2
@@ -425,14 +431,13 @@ class Lab3Driver(Node):
 					if np.isclose(furthest_left_dist, furthest_right_dist, 0.3): self.current_turn_dir = 1
 					elif furthest_right_dist > furthest_left_dist: self.current_turn_dir = -1
 					else: self.current_turn_dir = 1
-				
-				elif self.obstacle_left or self.obstacle_right:
-					self.current_turn_dir = 0
+			
 
 		#for setting the angular_z, I'm just going to use bang-bang control
-		angular_z = self.current_turn_dir * 0.25 * self.max_turn
-
-		return np.any(self.obstacle_front, self.obstacle_left, self.obstacle_right), x_speed, angular_z
+			# self.get_logger().info(f"current obstacle right = { np.min(distances[left_side_mask])}, and obstacle left = {np.min(distances[right_side_mask])}")
+		angular_z = self.current_turn_dir * self.max_turn
+		obstacle_detected = self.obstacle_front or self.obstacle_left or self.obstacle_right
+		return obstacle_detected, x_speed, angular_z
 
 	
 	
@@ -461,7 +466,7 @@ class Lab3Driver(Node):
 		linear_x = 0
 		angular_z = 0
 
-		if abs(target_angle) > np.pi/4:
+		if abs(target_angle) > np.pi/2:
 			linear_x = 0.0
 			angular_z = float(angle_direction * self.max_turn)
 		
