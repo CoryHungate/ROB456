@@ -383,7 +383,7 @@ class Lab3Driver(Node):
 		distances = np.array([d if not np.isinf(d) else 10.0 for d in scan.ranges])
 
 		#first, lets do a quick if so if anything is further away than 2 x stop_limit, just ignore return to get_twist
-		if np.min(distances) < 2 * self.stop_distance:
+		if np.min(distances) < 4 * self.stop_distance:
 			#first, I'm going to build "danger boxes" around the robot
 			#to begin, let's convert the scan to an x,y coordinate system
 			distances_xy = np.array([distances * np.cos(scan_angles), distances * np.sin(scan_angles)])
