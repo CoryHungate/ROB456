@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
 # Bill Smart, smartw@oregonstate.edu
+# Cory Hungate, hungatec@oregonstate.edu
 #
 # driver.py
-# Drive the robot towards a goal, going around an object
+# Drive the robot towards a goal, going around an object. 
+# shell code provided by Bill Smart (so keeing that reference). additions to code primarily in 
+# get_obstacle and get_twist with some additional "obstacle in the way of goal" logic in action_callback
 
 
 # Every Python node in ROS2 should include these lines.  rclpy is the basic Python
@@ -102,10 +105,26 @@ class Lab3Driver(Node):
 
 		# GUIDE: Declare any variables here
   # YOUR CODE HERE
+		self.min_speed = 0.05
+		self.max_speed = 0.2         # This moves about 0.01 m between scans
+		self.max_turn = np.pi * 0.1
+		self.obstacle_threshold = 1.7
+		self.width = 0.38
+		self.stop_distance = 1.0
+		self.current_turn_dir = 0
+		self.collision_width = self.width * 2
+		self.obstacle_left = False
+		self.obstacle_right = False
+		self.obstacle_front = False
+		self.side_threshold = self.width/2
+
+		self.best_distance = 20.0
+		self.last_improve_time = self.get_clock().now()
 
 		# Timer to make sure we publish the target marker (once we get a goal)
 		self.marker_timer = self.create_timer(1.0, self._marker_callback)
 
+		self.count_since_last_scan = 0
 		self.print_twist_messages = False
 		self.print_distance_messages = False
 
@@ -132,6 +151,7 @@ class Lab3Driver(Node):
 				self.target_marker.action = Marker.DELETE
 				self.target_pub.publish(self.target_marker)
 				self.target_marker = None
+				self.get_logger().info(f"Driver: Had an existing target marker; removing")
 			return
 		
 		# If we do not currently have a marker, make one
@@ -139,6 +159,8 @@ class Lab3Driver(Node):
 			self.target_marker = Marker()
 			self.target_marker.header.frame_id = self.goal.header.frame_id
 			self.target_marker.id = 0
+		
+			self.get_logger().info(f"Driver: Creating Marker")
 
 		# Build a marker for the target point
 		#   - this prints out the green dot in RViz (the current target)
@@ -190,9 +212,9 @@ class Lab3Driver(Node):
 	def close_enough(self):
 		""" Return true if close enough to goal. This will be used in action_callback to stop moving toward the goal
 		@ return true/false """
-
-  # YOUR CODE HERE
-		return False
+  	# YOUR CODE HERE
+		if self.distance_to_target() <= self.threshold: return True
+		else: return False
 
 	def distance_to_target(self):
 		""" Communicate with send points - set to distance to target"""
@@ -218,16 +240,38 @@ class Lab3Driver(Node):
 		# Reset target
 		self.set_target()
 
+		# my additions
+		self.best_distance = self.distance_to_target()
+		self.last_improve_time = self.get_clock().now().nanoseconds * 1e-9
+
 		# Keep publishing feedback, then sleeping (so the laser scan can happen)
-		# GUIDE for Lab3: If you aren't making progress, stop the while loop and mark the goal as failed
+		# GUIDE: If you aren't making progress, stop the while loop and mark the goal as failed
 		rate = self.create_rate(0.5)
 		while not self.close_enough():
 			if not self.goal:
-				# GUIDE: This will get called in lab 3 if you cancel a goal
 				self.get_logger().info(f"Goal was canceled")
 
 				return result
 			
+			# more of my additions to handle obstacle in the way of goal
+			now = self.get_clock().now().nanoseconds * 1e-9
+			d = self.distance_to_target()
+
+			if d < self.best_distance - 0.05:
+				self.best_distance = d 
+				self.last_improve_time = now
+			else:
+				if now - self.last_improve_time > 10:
+					self.get_logger().info("Goal aborted. Object in the way.")
+
+					t = self.zero_twist()
+					self.cmd_pub.publish(t)
+					self.goal = None
+					
+					goal_handle.abort()
+					return result
+
+			# back to provided code
 			feedback = NavTarget.Feedback()
 			feedback.distance.data = self.distance_to_target()
 			
@@ -304,6 +348,8 @@ class Lab3Driver(Node):
 	
 		if self.print_twist_messages:
 			self.get_logger().info("In scan callback")
+		# Got a scan - set back to zero
+		self.count_since_last_scan = 0
 
 		# If we have a goal, then act on it, otherwise stay still
 		if self.goal:
@@ -331,9 +377,72 @@ class Lab3Driver(Node):
 		
 		# GUIDE: Use this method to collect obstacle information - is something in front of, to the left, or to 
 		# the right of the robot? Start with your stopper code from Lab1
-  # YOUR CODE HERE
-		return False, 0.0, 0.0
+  		# YOUR CODE HERE
+		x_speed, angular_z = self.max_speed, 0
+		self.obstacle_left, self.obstacle_right = False, False
 
+		angle_min, angle_max, num_readings = scan.angle_min, scan.angle_max, len(scan.ranges)
+		scan_angles = np.linspace(angle_min, angle_max, num_readings)
+		distances = np.array([d if not np.isinf(d) else 10.0 for d in scan.ranges])
+
+		#first, lets do a quick if so if anything is further away than 2 x stop_limit, just ignore return to get_twist
+		if np.min(distances) < 4 * self.stop_distance:
+			#first, I'm going to build "danger boxes" around the robot
+			#to begin, let's convert the scan to an x,y coordinate system
+			distances_xy = np.array([distances * np.cos(scan_angles), distances * np.sin(scan_angles)])
+
+			#next, math to figure out my speed
+			inside_sideways = np.abs(distances_xy[1, :]) < self.width/2
+			shortest = np.min(distances_xy[0, inside_sideways])
+			speed_modifier = np.tanh(shortest - self.stop_distance)
+
+			#note that speed is declared independently... I shouldnt need to change the value below.
+			x_speed = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0	
+			
+			#next, I'm going to create my left and right danger boxes
+			left_side_mask_y = (distances_xy[1, :] < self.width) & (distances_xy[1, :] > self.width/2)
+			side_mask_x = distances_xy[0, :] < self.stop_distance
+			right_side_mask_y = (distances_xy[1, :] > -self.width) & (distances_xy[1, :] < -self.width/2)
+			danger_zone_left = side_mask_x & left_side_mask_y
+			danger_zone_right = side_mask_x & right_side_mask_y
+			self.obstacle_left = np.any(danger_zone_left)
+			self.obstacle_right = np.any(danger_zone_right)
+
+			if self.obstacle_left: self.current_turn_dir = -1
+			elif self.obstacle_right: self.current_turn_dir = 1
+			elif self.obstacle_front:
+				#check that I can leave avoid mode (maintain speed, set turn to zero)
+				#I'm currently in "avoid mode". maintain turn direction and speed
+				if shortest > self.obstacle_threshold:
+					self.obstacle_front = False
+					self.current_turn_dir = 0
+					#no need for an else statement, nothgning changes
+				
+			else:
+				#new obstacle detected
+				if shortest < self.obstacle_threshold:
+					self.obstacle_front = True
+					#first find the "openest" path
+					left_x_scans_mask = (distances * np.sin(scan_angles)) > self.collision_width/2
+					right_x_scans_mask = (distances * np.sin(scan_angles)) < -self.collision_width/2
+					x_distances = distances * np.cos(scan_angles)
+					furthest_left_dist = np.max(x_distances[left_x_scans_mask])
+					furthest_right_dist = np.max(x_distances[right_x_scans_mask])
+
+					#next, choose a direction based on which side is "openest"
+					if np.isclose(furthest_left_dist, furthest_right_dist, 0.3): self.current_turn_dir = -1
+					elif furthest_right_dist > furthest_left_dist: self.current_turn_dir = -1
+					else: self.current_turn_dir = 1
+			
+
+		#for setting the angular_z, I'm just going to use bang-bang control
+			# self.get_logger().info(f"current obstacle right = { np.min(distances[left_side_mask])}, and obstacle left = {np.min(distances[right_side_mask])}")
+		angular_z = self.current_turn_dir * self.max_turn
+		obstacle_detected = self.obstacle_front or self.obstacle_left or self.obstacle_right
+		return obstacle_detected, x_speed, angular_z
+
+	
+	
 	def get_twist(self, scan):
 		"""This is the method that calculate the twist
 		@param scan - a LaserScan message with the current data from the LiDAR.  Use this for obstacle avoidance. 
@@ -350,15 +459,34 @@ class Lab3Driver(Node):
 		# Reminder 2: target is in self.target 
 		#  Note: If the target is behind you, might turn first before moving
 		#  Note: 0.4 is a good speed if nothing is in front of the robot
+		target_angle = np.arctan2(self.target.point.y, self.target.point.x)
+		target_distance = self.distance_to_target()
+		obstacle_detected, obstacle_linear_x, obstacle_angular_z = self.get_obstacle(scan)
+		
+		angle_direction = np.sign(target_angle)
 
-		min_speed = 0.05
-		max_speed = 0.2         # This moves about 0.01 m between scans
-		max_turn = np.pi * 0.1  # This turns about 2 degrees between scans
+		linear_x = 0
+		angular_z = 0
+
+		if abs(target_angle) > np.pi/4:
+			linear_x = obstacle_linear_x
+			angular_z = float(angle_direction * self.max_turn)
+		
+		elif obstacle_detected:
+			linear_x = float(obstacle_linear_x)
+			angular_z = float(obstacle_angular_z)
+		else:
+			speed_modifier = np.tanh(target_distance - self.threshold/2)
+			linear_x = float(self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0)
+			if abs(target_angle) < np.pi/6: angular_z = 0.2 * angle_direction * self.max_turn
+			else: angular_z = float(angle_direction * self.max_turn)
+		
+		t.twist.linear.x = linear_x
+		t.twist.angular.z = angular_z
+
 
   # YOUR CODE HERE
 
-		# t.twist.linear.x = max_speed
-		# t.twist.angular.z = 0.0
 		if self.print_twist_messages:
 			self.get_logger().info(f"Setting twist forward {t.twist.linear.x} angle {t.twist.angular.z}")
 		return t			

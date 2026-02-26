@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
 # Bill Smart, smartw@oregonstate.edu
+# Cory Hungate, hungatec@oregonstate.edu
 #
 # driver.py
-# Drive the robot towards a goal, going around an object
+# Drive the robot towards a goal, going around an object. 
+# shell code provided by Bill Smart (so keeing that reference). additions to code primarily in 
+# get_obstacle and get_twist with some additional "obstacle in the way of goal" logic in action_callback
 
 
 # Every Python node in ROS2 should include these lines.  rclpy is the basic Python
