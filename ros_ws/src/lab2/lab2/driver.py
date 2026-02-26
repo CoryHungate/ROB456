@@ -113,6 +113,7 @@ class Lab3Driver(Node):
 		self.obstacle_left = False
 		self.obstacle_right = False
 		self.obstacle_front = False
+		self.side_threshold = self.width/2
 
 		self.best_distance = 20.0
 		self.last_improve_time = self.get_clock().now()
@@ -377,14 +378,14 @@ class Lab3Driver(Node):
 		x_speed, angular_z = self.max_speed, 0
 		self.obstacle_left, self.obstacle_right = False, False
 
-
 		angle_min, angle_max, num_readings = scan.angle_min, scan.angle_max, len(scan.ranges)
 		scan_angles = np.linspace(angle_min, angle_max, num_readings)
 		distances = np.array([d if not np.isinf(d) else 10.0 for d in scan.ranges])
 
 		#first, lets do a quick if so if anything is further away than 2 x stop_limit, just ignore return to get_twist
 		if np.min(distances) < 2 * self.stop_distance:
-			#first, let's convert the scan to an x,y coordinate system
+			#first, I'm going to build "danger boxes" around the robot
+			#to begin, let's convert the scan to an x,y coordinate system
 			distances_xy = np.array([distances * np.cos(scan_angles), distances * np.sin(scan_angles)])
 
 			#next, math to figure out my speed
@@ -393,32 +394,30 @@ class Lab3Driver(Node):
 			speed_modifier = np.tanh(shortest - self.stop_distance)
 
 			#note that speed is declared independently... I shouldnt need to change the value below.
-			x_speed = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0
-
-			#next, I'm going to check for obstacles to my left and right
-			left_side_mask = distances_xy[1, :] > self.width/2
-			right_side_mask = distances_xy[1, :] < -self.width/2
-			self.obstacle_left = True if np.min(distances[left_side_mask]) < self.collision_width/2 else False
-			self.obstacle_right = True if np.min(distances[right_side_mask]) < self.collision_width/2 else False
-			#self.obstacle_front = True if shortest < self.obstacle_threshold else False
+			x_speed = self.max_speed * speed_modifier if speed_modifier >= 0.1 else 0.0	
 			
+			#next, I'm going to create my left and right danger boxes
+			left_side_mask_y = (distances_xy[1, :] < self.width) & (distances_xy[1, :] > self.width/2)
+			side_mask_x = distances_xy[0, :] < self.stop_distance
+			right_side_mask_y = (distances_xy[1, :] > -self.width) & (distances_xy[1, :] < -self.width/2)
+			danger_zone_left = side_mask_x & left_side_mask_y
+			danger_zone_right = side_mask_x & right_side_mask_y
+			self.obstacle_left = np.any(danger_zone_left)
+			self.obstacle_right = np.any(danger_zone_right)
 
-			# !!!NOTE: I've changed obstacle detected to obstacle front... need to figure out the rest of the logic for how I want to do that...
-			if self.obstacle_front:
+			if self.obstacle_left: self.current_turn_dir = -1
+			elif self.obstacle_right: self.current_turn_dir = 1
+			elif self.obstacle_front:
 				#check that I can leave avoid mode (maintain speed, set turn to zero)
 				#I'm currently in "avoid mode". maintain turn direction and speed
 				if shortest > self.obstacle_threshold:
 					self.obstacle_front = False
 					self.current_turn_dir = 0
 					#no need for an else statement, nothgning changes
-			if self.obstacle_left: self.current_turn_dir = -1
-			if self.obstacle_right: self.current_turn_dir = 1
 				
 			else:
 				#new obstacle detected
-				if self.obstacle_left: self.current_turn_dir = -1
-				elif self.obstacle_right: self.current_turn_dir = 1
-				elif shortest < self.obstacle_threshold:
+				if shortest < self.obstacle_threshold:
 					self.obstacle_front = True
 					#first find the "openest" path
 					left_x_scans_mask = (distances * np.sin(scan_angles)) > self.collision_width/2
@@ -428,7 +427,7 @@ class Lab3Driver(Node):
 					furthest_right_dist = np.max(x_distances[right_x_scans_mask])
 
 					#next, choose a direction based on which side is "openest"
-					if np.isclose(furthest_left_dist, furthest_right_dist, 0.3): self.current_turn_dir = 1
+					if np.isclose(furthest_left_dist, furthest_right_dist, 0.3): self.current_turn_dir = -1
 					elif furthest_right_dist > furthest_left_dist: self.current_turn_dir = -1
 					else: self.current_turn_dir = 1
 			
@@ -466,8 +465,8 @@ class Lab3Driver(Node):
 		linear_x = 0
 		angular_z = 0
 
-		if abs(target_angle) > np.pi/2:
-			linear_x = 0.0
+		if abs(target_angle) > np.pi/4:
+			linear_x = obstacle_linear_x
 			angular_z = float(angle_direction * self.max_turn)
 		
 		elif obstacle_detected:
