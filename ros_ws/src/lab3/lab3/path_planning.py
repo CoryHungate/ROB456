@@ -195,19 +195,65 @@ def dijkstra(im, robot_loc=(0, 0), goal_loc=(0, 0)):
         #  See also lecture slides
         # YOUR CODE HERE
 
+        #some checks to see if at goal, is the node closed, and make sure that the current_distance isn't stale
+        if current_node_ij == goal_loc: break
+        if visited_closed_yn: continue
+        if distance_to_current_node - (abs(current_node_ij[0] - goal_loc[0]) + abs(current_node_ij[1] - goal_loc[1])) > visited_distance: continue
+        visited[current_node_ij] = (visited_distance, visited_parent, True) #Tuples are imutable you idiot!
+        
+        #for loop to run through the neighbors
+        for neighbor in four_connected(current_node_ij):
+            x, y = neighbor
+            neighbor_distance = visited_distance + 1
+            #adding the "distance to target" as a "manhattan distance"
+            manhattan = abs(neighbor[0] - goal_loc[0]) + abs(neighbor[1] - goal_loc[1])
+
+            #first, lets make sure that the index isn't going to throw an error or index a negative value...
+            if not 0<= x <im.shape[1] or not 0<= y <im.shape[0]:
+                continue
+
+            #next, lets make sure that the node is free and open
+            if not is_free(im, neighbor):
+                continue
+
+            #next, lets make sure that the disntance isn't shorter is neighbor in visited
+            if neighbor in visited:
+                if visited[neighbor][2]: continue
+                if neighbor_distance >= visited[neighbor][0]: continue
+
+            heapq.heappush(priority_queue, (neighbor_distance + manhattan, neighbor))
+            visited[neighbor] = (neighbor_distance, current_node_ij, False)       
+        
+
+
+
     # Now check that we actually found the goal node
     if not goal_loc in visited:
-        print(f"Goal {goal_loc} not reached, taking closest")
+        # print(f"Goal {goal_loc} not reached, taking closest")
 
         # GUIDE: Deal with not being able to get to the goal loc
         #   If the goal location is not reachable, find the node closest to the goal 
         #.  and return the path to it - you'll want this for the ROS 2 assignment
         # YOUR CODE HERE
+        minimum_distance = im.shape[0]**2 + im.shape[1]**2
+        new_goal = goal_loc
+        for node in visited:
+
+            if visited[node][2]:
+                dist_to_goal = (node[0] - goal_loc[0])**2 + (node[1] - goal_loc[1])**2
+                if dist_to_goal < minimum_distance: 
+                    minimum_distance = dist_to_goal
+                    new_goal = node
+        goal_loc = new_goal
 
     path = []
     path.append(goal_loc)
     # GUIDE: Build the path by starting at the goal node and working backwards
     # YOUR CODE HERE
+    prev_location = visited[goal_loc][1]
+    while prev_location is not None:
+        path.append(prev_location)
+        prev_location = visited[prev_location][1]
 
     return path
 
@@ -228,7 +274,7 @@ def open_image(im_name):
               "Assignments/Data/" + im_name, 
               "Skills/Data/" + im_name,
               "../../../../Skills/Data/" + im_name,
-              "../../../../Assignments/Data" + im_name,
+              "../../../../Assignments/Data/" + im_name,
               ]
     im = None
     print(f"{os.getcwd()}")
